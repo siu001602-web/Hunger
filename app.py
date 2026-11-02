@@ -2,8 +2,8 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 st.set_page_config(
-    page_title="헝거게임 - 맵 이벤트 시각화 패치",
-    page_icon="🗺️",
+    page_title="헝거게임 - 은신·야수·정찰 시스템 패치",
+    page_icon="🐾",
     layout="wide"
 )
 
@@ -101,20 +101,14 @@ html_code = """
     .sector-lake { background-color: #0c4a6e; color: #e0f2fe; }
     .sector-ruins { background-color: #4c1d95; color: #f3e8ff; }
 
-    /* 구역 봉쇄 / 재난 스타일 */
     .sector.sealed {
       background-color: #450a0a !important;
       border: 2px solid #ef4444 !important;
       color: #fca5a5;
     }
-    .sector.fire-event {
-      border: 2px solid #f97316 !important;
-      box-shadow: inset 0 0 10px #f97316;
-    }
-    .sector.fog-event {
-      border: 2px solid #a855f7 !important;
-      box-shadow: inset 0 0 10px #a855f7;
-    }
+    .sector.fire-event { border: 2px solid #f97316 !important; box-shadow: inset 0 0 10px #f97316; }
+    .sector.fog-event { border: 2px solid #a855f7 !important; box-shadow: inset 0 0 10px #a855f7; }
+    .sector.beast-event { border: 2px solid #ef4444 !important; box-shadow: inset 0 0 12px #ef4444; }
 
     .sector-title { font-weight: bold; opacity: 0.85; font-size: 0.65rem; display: flex; justify-content: space-between; align-items: center; }
     .event-icons { font-size: 0.75rem; }
@@ -148,6 +142,9 @@ html_code = """
     .log-seal { border-left: 3px solid #dc2626; color: #fecaca; font-weight: bold; }
     .log-sponsor { border-left: 3px solid #10b981; color: #a7f3d0; font-weight: bold; }
     .log-disaster { border-left: 3px solid #ec4899; color: #fbcfe8; font-weight: bold; }
+    .log-stealth { border-left: 3px solid #6366f1; color: #c7d2fe; }
+    .log-beast { border-left: 3px solid #dc2626; color: #fca5a5; font-weight: bold; }
+    .log-scout { border-left: 3px solid #0ea5e9; color: #e0f2fe; }
 
     #death-modal {
       position: fixed; top: 0; left: 0; width: 100%; height: 100%;
@@ -176,7 +173,7 @@ html_code = """
   </div>
 
   <header>
-    <h1>🔥 헝거게임 (맵 이벤트 아이콘 표시 패치)</h1>
+    <h1>🔥 헝거게임 (은신·야수·정찰 패치)</h1>
     <div style="display: flex; gap: 10px;">
       <button class="btn btn-primary" onclick="initGame()">새 경기 시작</button>
       <button class="btn btn-warning" id="btn-auto" onclick="toggleAutoPlay()">⏰ 자동 진행 시작 (10초)</button>
@@ -186,7 +183,7 @@ html_code = """
   <div class="game-status-bar">
     <div>라운드: <span id="round-count">1</span></div>
     <div>생존자: <span id="alive-count">20</span> / 20명</div>
-    <div>봉쇄 규칙: <span id="seal-status" style="color: #f59e0b; font-weight: bold;">20턴 전: 10턴마다 / 이후: 3턴마다</span></div>
+    <div>봉쇄 규칙: <span id="seal-status" style="color: #f59e0b; font-weight: bold;">20턴 전: 10턴 / 이후: 3턴</span></div>
     <div>상태: <span id="auto-status" style="color: #4ade80; font-weight: bold;">수동 조작 중</span></div>
   </div>
 
@@ -237,8 +234,9 @@ html_code = """
     let players = [];
     let round = 1;
     let sealedSectors = [];
-    let activeDisasters = {}; // 구역별 재난 상태 (예: { 1: "🔥", 3: "🌫️" })
-    let activeSponsors = {};  // 구역별 보급품 상태 (예: { 5: "📦" })
+    let activeDisasters = {};
+    let activeSponsors = {};
+    let activeBeasts = {};
     let autoInterval = null;
     let isAutoRunning = false;
 
@@ -277,6 +275,7 @@ html_code = """
         medkits: 0,
         kills: 0,
         team: null,
+        isStealth: false, // 은신 여부
         sectorId: (i % 2 === 0) ? 5 : 6,
         isAlive: true
       }));
@@ -285,8 +284,9 @@ html_code = """
       sealedSectors = [];
       activeDisasters = {};
       activeSponsors = {};
+      activeBeasts = {};
       document.getElementById('log-box').innerHTML = '';
-      log(`🚩 경기 시작! 스폰서(📦), 산불(🔥), 독안개(🌫️)가 맵에 실시간으로 표시됩니다.`, 'event');
+      log(`🚩 경기 시작! 은신(👻), 돌연변이 야수(🐾), 정찰(🔭) 시스템이 활성화되었습니다.`, 'event');
       updateUI();
     }
 
@@ -338,21 +338,24 @@ html_code = """
         const isSealed = sealedSectors.includes(sec.id);
         const disasterIcon = activeDisasters[sec.id] || '';
         const sponsorIcon = activeSponsors[sec.id] || '';
+        const beastIcon = activeBeasts[sec.id] || '';
 
         let extraClass = '';
         if (disasterIcon === '🔥') extraClass = 'fire-event';
         if (disasterIcon === '🌫️') extraClass = 'fog-event';
+        if (beastIcon === '🐾') extraClass = 'beast-event';
 
         secDiv.className = `sector sector-${sec.type} ${isSealed ? 'sealed' : ''} ${extraClass}`;
         
         const inSec = players.filter(p => p.sectorId === sec.id && p.isAlive);
         let tokensHtml = inSec.map(p => {
           const style = getPlayerColor(p.kills);
-          return `<span class="token" style="background:${style.color}; color:#0f172a;">${p.name} (${p.kills}킬)</span>`;
+          const stealthMark = p.isStealth ? ' 👻' : '';
+          return `<span class="token" style="background:${style.color}; color:#0f172a;">${p.name}${stealthMark}</span>`;
         }).join('');
 
         const sealLabel = isSealed ? '<span style="color:#f87171; font-weight:bold; font-size:0.6rem;">🚫 [봉쇄]</span>' : '';
-        const eventIcons = `<span class="event-icons">${disasterIcon}${sponsorIcon}</span>`;
+        const eventIcons = `<span class="event-icons">${disasterIcon}${sponsorIcon}${beastIcon}</span>`;
 
         secDiv.innerHTML = `
           <div>
@@ -375,12 +378,13 @@ html_code = """
         const card = document.createElement('div');
         card.className = `player-card ${p.isAlive ? '' : 'dead'}`;
         const teamBadge = p.team ? `<span style="color:#60a5fa; font-size:0.6rem;">[팀: ${p.team}]</span>` : `<span style="color:#94a3b8; font-size:0.6rem;">[솔로]</span>`;
+        const stealthBadge = p.isStealth ? `<span style="color:#a5b4fc; font-size:0.6rem; font-weight:bold;"> [👻은신중]</span>` : '';
         
         const style = getPlayerColor(p.kills);
         const invText = p.inventory.length > 0 ? p.inventory.map(w => w.name).join(', ') : '없음';
 
         card.innerHTML = `
-          <strong style="color: ${style.color}; ${style.glow}">${p.name}</strong><br>
+          <strong style="color: ${style.color}; ${style.glow}">${p.name}</strong>${stealthBadge}<br>
           ${teamBadge}<br>
           <span style="font-size:0.6rem; color:#f59e0b; font-weight:bold;">🎯 킬: ${p.kills}</span><br>
           <span style="font-size:0.6rem; color:#cbd5e1;">🎒 무기: [${invText}]</span><br>
@@ -407,17 +411,52 @@ html_code = """
 
       log(`--- 📢 라운드 ${round} 시작 ---`, 'event');
 
-      // 라운드 변경 시 이전 단발성 이벤트 아이콘 초기화
       activeDisasters = {};
       activeSponsors = {};
+      activeBeasts = {};
 
-      // [환경 재난 이벤트] 매 7턴마다 무작위 2~3개 구역에 산불 또는 독안개 발생
+      // [기능 1: 은신 시스템] 매 턴마다 생존자 중 30% 확률로 은신 상태 돌입/해제
+      aliveList.forEach(p => {
+        if (Math.random() < 0.3) {
+          p.isStealth = true;
+          log(`👻 <strong>${p.name}</strong>님이 주변 지형을 이용해 모습을 <strong>은신</strong>했습니다!`, 'stealth');
+        } else {
+          p.isStealth = false;
+        }
+      });
+
+      // [기능 3: 돌연변이 야수 출현] 생존자가 5명 이하일 때 후반부 긴장감 유발
+      if (aliveList.length <= 5) {
+        const beastSector = SECTORS.filter(s => !sealedSectors.includes(s.id));
+        if (beastSector.length > 0) {
+          const targetBeastSec = beastSector[Math.floor(Math.random() * beastSector.length)];
+          activeBeasts[targetBeastSec.id] = "🐾";
+          log(`🐾 <strong>[돌연변이 야수 출현]</strong> [${targetBeastSec.name}] 구역에 사나운 경기장 야수들이 나타났습니다!`, 'beast');
+
+          // 해당 구역 생존자 습격
+          players.forEach(p => {
+            if (p.isAlive && p.sectorId === targetBeastSec.id && !p.isStealth) {
+              const beastDmg = Math.floor(Math.random() * 25) + 20;
+              p.hp -= beastDmg;
+              log(`⚠️ 야수가 <strong>${p.name}</strong>님을 습격해 HP -${beastDmg} 피해를 입혔습니다!`, 'beast');
+
+              if (p.hp <= 0 && p.isAlive) {
+                p.isAlive = false;
+                p.hp = 0;
+                showDeathModal(`<strong>${p.name}</strong>님이 돌연변이 야수에게 습격당해 사망했습니다!`);
+                log(`💀 <strong>${p.name}</strong>님이 야수의 습격으로 전사하셨습니다.`, 'beast');
+              }
+            }
+          });
+        }
+      }
+
+      // [환경 재난] 매 7턴마다
       if (round > 1 && round % 7 === 0) {
         const isFire = Math.random() < 0.5;
         const disasterName = isFire ? "산불" : "독안개";
         const disasterIcon = isFire ? "🔥" : "🌫️";
 
-        // 아직 봉쇄되지 않은 구역 중 2개 선정하여 재난 발생
         const openSectors = SECTORS.filter(s => !sealedSectors.includes(s.id));
         const affectedSectors = [...openSectors].sort(() => Math.random() - 0.5).slice(0, 2);
 
@@ -427,18 +466,16 @@ html_code = """
 
         log(`🌪️ <strong>[환경 재난]</strong> [${affectedSectors.map(s => s.name).join(', ')}] 구역에 <strong>${disasterName} ${disasterIcon}</strong>이(가) 불어닥칩니다!`, 'disaster');
 
-        // 해당 구역에 있던 플레이어들에게 피해
         aliveList.forEach(p => {
-          if (affectedSectors.some(sec => sec.id === p.sectorId)) {
+          if (affectedSectors.some(sec => sec.id === p.sectorId) && !p.isStealth) {
             const disasterDmg = Math.floor(Math.random() * 15) + 15;
             p.hp -= disasterDmg;
-            log(`⚠️ [${disasterName}] <strong>${p.name}</strong>님이 피해를 입어 HP -${disasterDmg} (남은 HP: ${Math.max(0, p.hp)})`, 'disaster');
+            log(`⚠️ [${disasterName}] <strong>${p.name}</strong>님이 피해를 입어 HP -${disasterDmg}`, 'disaster');
 
             if (p.hp <= 0 && p.isAlive) {
               p.isAlive = false;
               p.hp = 0;
               showDeathModal(`<strong>${p.name}</strong>님이 ${disasterName}에 휩쓸려 사망했습니다!`);
-              log(`💀 <strong>${p.name}</strong>님이 ${disasterName}로 전사하셨습니다.`, 'disaster');
             }
           }
         });
@@ -453,7 +490,7 @@ html_code = """
         }
       });
 
-      // 구역 봉쇄 체킹
+      // 구역 봉쇄
       let shouldSeal = false;
       if (round < 20) {
         if (round > 1 && (round - 1) % 10 === 0) shouldSeal = true;
@@ -491,6 +528,11 @@ html_code = """
         }
       });
 
+      // [기능 4: 정찰 및 정보 수집] 무작위 플레이어가 주변 구역 정찰 정보 습득
+      const scoutPlayer = aliveList[Math.floor(Math.random() * aliveList.length)];
+      const scoutSecName = SECTORS[scoutPlayer.sectorId].name;
+      log(`🔭 <strong>[정찰 보고]</strong> <strong>${scoutPlayer.name}</strong>님이 ${scoutSecName} 구역 주변의 적 동선을 정찰하여 정보를 파악했습니다.`, 'scout');
+
       // 2. 동맹 & 배신
       if (Math.random() < 0.4) {
         const p1 = aliveList[Math.floor(Math.random() * aliveList.length)];
@@ -508,7 +550,7 @@ html_code = """
         }
       }
 
-      // [스폰서 보급품 맵 투하] 30% 확률로 맵 상의 무작위 구역에 📦 보급 아이콘 표시 및 지원
+      // 스폰서 보급품
       if (Math.random() < 0.3) {
         const luckySponsor = aliveList[Math.floor(Math.random() * aliveList.length)];
         activeSponsors[luckySponsor.sectorId] = "📦";
@@ -516,10 +558,10 @@ html_code = """
         if (Math.random() < 0.5) {
           const sponsorWep = WEAPONS_POOL[Math.floor(Math.random() * WEAPONS_POOL.length)];
           luckySponsor.inventory.push(sponsorWep);
-          log(`📦 <strong>[스폰서 보급품]</strong> [${SECTORS[luckySponsor.sectorId].name}] 구역에 낙하산 투하! <strong>${luckySponsor.name}</strong>에게 [${sponsorWep.name}] 지급!`, 'sponsor');
+          log(`📦 <strong>[스폰서 보급품]</strong> [${SECTORS[luckySponsor.sectorId].name}] 구역 투하! <strong>${luckySponsor.name}</strong>에게 [${sponsorWep.name}] 지급!`, 'sponsor');
         } else {
           luckySponsor.medkits += 1;
-          log(`📦 <strong>[스폰서 보급품]</strong> [${SECTORS[luckySponsor.sectorId].name}] 구역에 구급상자 📦 투하 완료! (${luckySponsor.name} 획득)`, 'sponsor');
+          log(`📦 <strong>[스폰서 보급품]</strong> [${SECTORS[luckySponsor.sectorId].name}] 구역 구급상자 투하!`, 'sponsor');
         }
       }
 
@@ -534,15 +576,18 @@ html_code = """
         log(`🎁 <strong>${lucky.name}</strong>이(가) [${SECTORS[lucky.sectorId].name}]에서 구급상자를 주웠습니다.`, 'event');
       }
 
-      // 4. 전투
+      // 4. 전투 (은신 중인 플레이어는 공격 대상에서 제외됨)
       SECTORS.forEach(sec => {
         if (sealedSectors.includes(sec.id)) return;
 
+        // 은신하지 않은 생존자들 우선 교전
         const secAlive = players.filter(p => p.sectorId === sec.id && p.isAlive);
-        if (secAlive.length >= 2) {
-          const p1 = secAlive[0];
-          const enemies = secAlive.filter(p => p.id !== p1.id && (!p1.team || p1.team !== p.team));
-          const targetPool = enemies.length > 0 ? enemies : secAlive.filter(p => p.id !== p1.id);
+        const combatants = secAlive.filter(p => !p.isStealth);
+
+        if (combatants.length >= 2) {
+          const p1 = combatants[0];
+          const enemies = combatants.filter(p => p.id !== p1.id && (!p1.team || p1.team !== p.team));
+          const targetPool = enemies.length > 0 ? enemies : combatants.filter(p => p.id !== p1.id);
           
           if (targetPool.length > 0) {
             const p2 = targetPool[Math.floor(Math.random() * targetPool.length)];

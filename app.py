@@ -2,8 +2,8 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 st.set_page_config(
-    page_title="헝거게임 - 닉네임 색상만 적용",
-    page_icon="🔥",
+    page_title="헝거게임 - 일회용 무기 & 인벤토리 시스템",
+    page_icon="🎒",
     layout="wide"
 )
 
@@ -109,7 +109,7 @@ html_code = """
       font-weight: bold;
     }
 
-    .grid-players { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; max-height: 500px; overflow-y: auto; }
+    .grid-players { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; max-height: 500px; overflow-y: auto; }
     .player-card {
       background-color: var(--panel-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 8px; text-align: center;
     }
@@ -156,7 +156,7 @@ html_code = """
   </div>
 
   <header>
-    <h1>🔥 헝거게임 (닉네임 색상 & 킬수 표시)</h1>
+    <h1>🔥 헝거게임 (일회용 무기 & 인벤토리 시스템)</h1>
     <div style="display: flex; gap: 10px;">
       <button class="btn btn-primary" onclick="initGame()">새 경기 시작</button>
       <button class="btn btn-warning" id="btn-auto" onclick="toggleAutoPlay()">⏰ 자동 진행 시작 (10초)</button>
@@ -176,7 +176,7 @@ html_code = """
     </div>
 
     <div>
-      <h3>👥 참가자 상태 현황</h3>
+      <h3>👥 참가자 상태 현황 (인벤토리)</h3>
       <br>
       <div class="grid-players" id="player-grid"></div>
     </div>
@@ -206,9 +206,12 @@ html_code = """
       { id: 14, name: "남동 숲", type: "forest" }, { id: 15, name: "동남 폐허", type: "ruins" }
     ];
 
-    const WEAPONS = [
-      { name: "맨손", dmg: 10 }, { name: "돌멩이", dmg: 15 },
-      { name: "단검", dmg: 25 }, { name: "장궁", dmg: 35 }, { name: "강철 창", dmg: 45 }
+    // 일회용 무기 종류 및 공격력 목록
+    const WEAPONS_POOL = [
+      { name: "돌멩이", dmg: 15 },
+      { name: "단검", dmg: 25 },
+      { name: "장궁", dmg: 35 },
+      { name: "강철 창", dmg: 45 }
     ];
 
     let players = [];
@@ -216,12 +219,11 @@ html_code = """
     let autoInterval = null;
     let isAutoRunning = false;
 
-    // 킬 수에 따른 닉네임 색상만 반환 (보상/칭호 텍스트 제외)
     function getPlayerColor(kills) {
-      if (kills >= 5) return { color: "#ef4444", glow: "text-shadow: 0 0 6px #ef4444;" }; // 붉은색 (5킬 이상)
-      if (kills >= 3) return { color: "#f59e0b", glow: "text-shadow: 0 0 4px #f59e0b;" }; // 주황색 (3~4킬)
-      if (kills >= 1) return { color: "#38bdf8", glow: "" }; // 하늘색 (1~2킬)
-      return { color: "#f8fafc", glow: "" }; // 기본 하얀색 (0킬)
+      if (kills >= 5) return { color: "#ef4444", glow: "text-shadow: 0 0 6px #ef4444;" };
+      if (kills >= 3) return { color: "#f59e0b", glow: "text-shadow: 0 0 4px #f59e0b;" };
+      if (kills >= 1) return { color: "#38bdf8", glow: "" };
+      return { color: "#f8fafc", glow: "" };
     }
 
     function log(msg, type = 'event') {
@@ -248,7 +250,7 @@ html_code = """
         id: i + 1,
         name: NAMES[i],
         hp: 100,
-        weapon: WEAPONS[0],
+        inventory: [], // 일회용 무기들을 여러 개 모아둘 수 있는 가방(인벤토리)
         kills: 0,
         team: null,
         sectorId: (i % 2 === 0) ? 5 : 6,
@@ -324,19 +326,21 @@ html_code = """
         if (p.isAlive) aliveCnt++;
         const card = document.createElement('div');
         card.className = `player-card ${p.isAlive ? '' : 'dead'}`;
-        const teamBadge = p.team ? `<span style="color:#60a5fa; font-size:0.65rem;">[팀: ${p.team}]</span>` : `<span style="color:#94a3b8; font-size:0.65rem;">[솔로]</span>`;
+        const teamBadge = p.team ? `<span style="color:#60a5fa; font-size:0.6rem;">[팀: ${p.team}]</span>` : `<span style="color:#94a3b8; font-size:0.6rem;">[솔로]</span>`;
         
         const style = getPlayerColor(p.kills);
+        const invText = p.inventory.length > 0 ? p.inventory.map(w => w.name).join(', ') : '없음 (맨손)';
 
+        card.html = '';
         card.innerHTML = `
           <strong style="color: ${style.color}; ${style.glow}">${p.name}</strong><br>
           ${teamBadge}<br>
-          <span style="font-size:0.65rem; color:#f59e0b; font-weight:bold;">🎯 킬수: ${p.kills}</span><br>
-          <span style="font-size:0.65rem;">🗡️ ${p.weapon.name}</span>
+          <span style="font-size:0.6rem; color:#f59e0b; font-weight:bold;">🎯 킬: ${p.kills}</span><br>
+          <span style="font-size:0.6rem; color:#cbd5e1;">🎒 인벤: [${invText}]</span>
           <div class="hp-bar-bg">
             <div class="hp-bar-fill" style="width: ${Math.max(0, p.hp)}%; background: ${p.hp > 50 ? '#22c55e' : '#ef4444'};"></div>
           </div>
-          <span style="font-size:0.65rem;">HP: ${Math.max(0, p.hp)}</span>
+          <span style="font-size:0.6rem;">HP: ${Math.max(0, p.hp)}</span>
         `;
         playerGrid.appendChild(card);
       });
@@ -355,12 +359,14 @@ html_code = """
 
       log(`--- 📢 라운드 ${round} 시작 ---`, 'event');
 
+      // 1. 이동
       aliveList.forEach(p => {
         if (Math.random() < 0.65) {
           p.sectorId = Math.floor(Math.random() * SECTORS.length);
         }
       });
 
+      // 2. 동맹 & 배신 이벤트
       if (Math.random() < 0.4) {
         const p1 = aliveList[Math.floor(Math.random() * aliveList.length)];
         const p2 = aliveList[Math.floor(Math.random() * aliveList.length)];
@@ -377,13 +383,13 @@ html_code = """
         }
       }
 
+      // 3. 일회용 무기 파밍 (인벤토리에 여러 개 보관 가능)
       const lucky = aliveList[Math.floor(Math.random() * aliveList.length)];
-      const newWep = WEAPONS[Math.floor(Math.random() * (WEAPONS.length - 1)) + 1];
-      if (newWep.dmg > lucky.weapon.dmg) {
-        lucky.weapon = newWep;
-        log(`🎁 <strong>${lucky.name}</strong>이(가) [${SECTORS[lucky.sectorId].name}]에서 [${newWep.name}]을(를) 획득했습니다!`, 'event');
-      }
+      const foundWeapon = WEAPONS_POOL[Math.floor(Math.random() * WEAPONS_POOL.length)];
+      lucky.inventory.push(foundWeapon);
+      log(`🎁 <strong>${lucky.name}</strong>이(가) [${SECTORS[lucky.sectorId].name}]에서 일회용 무기 [${foundWeapon.name}](공격력 ${foundWeapon.dmg})을(를) 주워 가방에 넣었습니다!`, 'event');
 
+      // 4. 전투 및 일회용 무기 소모(사모) 시스템
       SECTORS.forEach(sec => {
         const secAlive = players.filter(p => p.sectorId === sec.id && p.isAlive);
         if (secAlive.length >= 2) {
@@ -393,10 +399,23 @@ html_code = """
           
           if (targetPool.length > 0) {
             const p2 = targetPool[Math.floor(Math.random() * targetPool.length)];
-            const dmg = p1.weapon.dmg + Math.floor(Math.random() * 12);
+
+            // p1의 인벤토리에서 가장 강한 무기를 찾아 일회용으로 소모
+            let usedWeaponName = "맨손";
+            let baseDmg = 10;
+
+            if (p1.inventory.length > 0) {
+              // 공격력 높은 순서대로 정렬 후 가장 센 것 1개 꺼내기 (소모)
+              p1.inventory.sort((a, b) => b.dmg - a.dmg);
+              const consumedWeapon = p1.inventory.shift(); // 인벤토리에서 제거 (일회용 소모)
+              usedWeaponName = consumedWeapon.name;
+              baseDmg = consumedWeapon.dmg;
+            }
+
+            const dmg = baseDmg + Math.floor(Math.random() * 10);
             p2.hp -= dmg;
 
-            log(`⚔️ [${sec.name}] <strong>${p1.name}</strong>의 공격! <strong>${p2.name}</strong>에게 ${dmg} 피해`, 'battle');
+            log(`⚔️ [${sec.name}] <strong>${p1.name}</strong>이(가) <strong>[${usedWeaponName}]</strong>을(를) 사용하여 <strong>${p2.name}</strong>을(를) 공격! (${dmg} 피해, 무기 소모됨)`, 'battle');
 
             if (p2.hp <= 0 && p2.isAlive) {
               p2.isAlive = false;

@@ -2,8 +2,8 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 st.set_page_config(
-    page_title="20인 AI 헝거게임 & 경기장 맵",
-    page_icon="🗺️",
+    page_title="헝거게임 - 자동진행 & 팀/배신 모드",
+    page_icon="🔥",
     layout="wide"
 )
 
@@ -13,7 +13,7 @@ html_code = """
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AI 헝거게임 시뮬레이터 & 맵</title>
+  <title>헝거게임 시뮬레이터</title>
   <style>
     :root {
       --bg-color: #0f172a;
@@ -24,7 +24,7 @@ html_code = """
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Pretendard', sans-serif; }
-    body { background-color: var(--bg-color); color: var(--text-main); padding: 20px; display: flex; flex-direction: column; gap: 20px; }
+    body { background-color: var(--bg-color); color: var(--text-main); padding: 20px; display: flex; flex-direction: column; gap: 20px; position: relative; }
 
     header {
       background-color: var(--panel-bg);
@@ -43,10 +43,12 @@ html_code = """
     }
     .btn-primary { background-color: #2563eb; color: white; }
     .btn-warning { background-color: #d97706; color: white; }
+    .btn-danger { background-color: #e11d48; color: white; }
     .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
     .game-status-bar {
       display: flex; gap: 20px; background-color: var(--panel-bg); padding: 12px 20px; border-radius: 12px; border: 1px solid var(--border-color);
+      align-items: center; font-size: 1.1rem;
     }
 
     .main-layout {
@@ -93,24 +95,22 @@ html_code = """
       overflow: hidden;
     }
 
-    .sector-center { background-color: #7c2d12; color: #ffedd5; } /* 중앙 풍요의 뿔 */
-    .sector-forest { background-color: #14532d; color: #dcfce7; } /* 숲 지대 */
-    .sector-mountain { background-color: #3f3f46; color: #f4f4f5; } /* 산악 지대 */
-    .sector-lake { background-color: #0c4a6e; color: #e0f2fe; } /* 호수/강 */
-    .sector-ruins { background-color: #4c1d95; color: #f3e8ff; } /* 폐허 */
+    .sector-center { background-color: #7c2d12; color: #ffedd5; }
+    .sector-forest { background-color: #14532d; color: #dcfce7; }
+    .sector-mountain { background-color: #3f3f46; color: #f4f4f5; }
+    .sector-lake { background-color: #0c4a6e; color: #e0f2fe; }
+    .sector-ruins { background-color: #4c1d95; color: #f3e8ff; }
 
-    .sector-title { font-weight: bold; opacity: 0.8; font-size: 0.7rem; }
-    .player-tokens { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+    .sector-title { font-weight: bold; opacity: 0.8; font-size: 0.65rem; }
+    .player-tokens { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; }
     .token {
       background: #2563eb;
       color: white;
-      font-size: 0.65rem;
+      font-size: 0.6rem;
       padding: 2px 4px;
-      border-radius: 4px;
+      border-radius: 3px;
       font-weight: bold;
-      box-shadow: 0 0 4px rgba(0,0,0,0.5);
     }
-    .token-dead { background: #475569; opacity: 0.5; text-decoration: line-through; }
 
     /* 플레이어 리스트 및 로그 */
     .grid-players { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; max-height: 500px; overflow-y: auto; }
@@ -130,41 +130,68 @@ html_code = """
     .log-item { padding: 8px 12px; border-radius: 6px; font-size: 0.85rem; background: #0f172a; line-height: 1.4; }
     .log-event { border-left: 3px solid #f59e0b; }
     .log-battle { border-left: 3px solid #ef4444; color: #fca5a5; }
-    .log-move { border-left: 3px solid #10b981; color: #a7f3d0; }
+    .log-team { border-left: 3px solid #3b82f6; color: #bfdbfe; }
+    .log-betray { border-left: 3px solid #a855f7; color: #f3e8ff; }
+
+    /* 대형 사망 팝업 모달 */
+    #death-modal {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0, 0, 0, 0.75); display: flex; justify-content: center; align-items: center;
+      z-index: 9999; opacity: 0; pointer-events: none; transition: opacity 0.3s ease;
+    }
+    #death-modal.show { opacity: 1; pointer-events: auto; }
+    .modal-content {
+      background: #7f1d1d; border: 3px solid #f87171; padding: 30px 50px; border-radius: 16px;
+      text-align: center; box-shadow: 0 0 30px rgba(239, 68, 68, 0.6);
+      animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+    @keyframes popIn {
+      0% { transform: scale(0.6); }
+      100% { transform: scale(1); }
+    }
   </style>
 </head>
 <body>
 
+  <!-- 사망 대형 팝업 -->
+  <div id="death-modal">
+    <div class="modal-content">
+      <h2 style="color: #fca5a5; font-size: 1.8rem; margin-bottom: 10px;">💀 사망 발생!</h2>
+      <p id="death-modal-text" style="font-size: 1.2rem; font-weight: bold; color: #fff;">누군가 사망했습니다.</p>
+    </div>
+  </div>
+
   <header>
-    <h1>🗺️ 20인 헝거게임 경기장 맵 시뮬레이터</h1>
-    <button class="btn btn-primary" onclick="initGame()">새 경기 시작</button>
+    <h1>🔥 헝거게임 (팀/배신 모드 & 10초 자동진행)</h1>
+    <div style="display: flex; gap: 10px;">
+      <button class="btn btn-primary" onclick="initGame()">새 경기 시작</button>
+      <button class="btn btn-warning" id="btn-auto" onclick="toggleAutoPlay()">⏰ 자동 진행 시작 (10초)</button>
+    </div>
   </header>
 
   <div class="game-status-bar">
     <div>라운드: <span id="round-count">1</span></div>
     <div>생존자: <span id="alive-count">20</span> / 20명</div>
+    <div>상태: <span id="auto-status" style="color: #4ade80; font-weight: bold;">수동 조작 중</span></div>
   </div>
 
   <div class="main-layout">
-    <!-- 1. 경기장 맵 시각화 -->
     <div class="map-container">
-      <h3>🗺️ 경기장 구역 맵 (4x4)</h3>
+      <h3>🗺️ 경기장 맵 (4x4)</h3>
       <div class="arena-grid" id="arena-map"></div>
     </div>
 
-    <!-- 2. 참가자 현황 -->
     <div>
-      <h3>👥 참가자 상태 현황</h3>
+      <h3>👥 참가자 상태 현황 (팀/무기)</h3>
       <br>
       <div class="grid-players" id="player-grid"></div>
     </div>
 
-    <!-- 3. 경기 진행 로그 -->
     <div class="log-container">
-      <h3>📜 라운드 진행 로그</h3>
+      <h3>📜 경기 진행 로그</h3>
       <div class="log-messages" id="log-box"></div>
       <div style="margin-top: 10px;">
-        <button class="btn btn-warning" id="btn-next" onclick="nextRound()">⚔️ 다음 라운드 진행</button>
+        <button class="btn btn-warning" id="btn-next" onclick="nextRound()" style="width: 100%;">⚔️ 수동 다음 라운드</button>
       </div>
     </div>
   </div>
@@ -174,36 +201,26 @@ html_code = """
     const NAMES = ["카트니스", "피타", "게일", "헤이밋치", "피닉", "조한나", "루", "카토", "클로브", "마블",
                    "글리머", "트레시", "포스포어", "브루투스", "에노바리아", "비티", "바이퍼", "오마르", "엘리", "잭"];
     
-    // 4x4 구역 정보 정의
     const SECTORS = [
-      { id: 0, name: "북서쪽 산악", type: "mountain" },
-      { id: 1, name: "북쪽 숲", type: "forest" },
-      { id: 2, name: "북동쪽 숲", type: "forest" },
-      { id: 3, name: "동쪽 호수", type: "lake" },
-      { id: 4, name: "서쪽 숲", type: "forest" },
-      { id: 5, name: "풍요의 뿔(중앙)", type: "center" },
-      { id: 6, name: "풍요의 뿔(중앙)", type: "center" },
-      { id: 7, name: "동쪽 숲", type: "forest" },
-      { id: 8, name: "서쪽 폐허", type: "ruins" },
-      { id: 9, name: "남서쪽 숲", type: "forest" },
-      { id: 10, name: "남쪽 호수", type: "lake" },
-      { id: 11, name: "남동쪽 산악", type: "mountain" },
-      { id: 12, name: "남서쪽 절벽", type: "mountain" },
-      { id: 13, name: "남쪽 숲", type: "forest" },
-      { id: 14, name: "남동쪽 숲", type: "forest" },
-      { id: 15, name: "동남쪽 폐허", type: "ruins" }
+      { id: 0, name: "북서 산악", type: "mountain" }, { id: 1, name: "북쪽 숲", type: "forest" },
+      { id: 2, name: "북동 숲", type: "forest" }, { id: 3, name: "동쪽 호수", type: "lake" },
+      { id: 4, name: "서쪽 숲", type: "forest" }, { id: 5, name: "풍요의 뿔", type: "center" },
+      { id: 6, name: "풍요의 뿔", type: "center" }, { id: 7, name: "동쪽 숲", type: "forest" },
+      { id: 8, name: "서쪽 폐허", type: "ruins" }, { id: 9, name: "남서 숲", type: "forest" },
+      { id: 10, name: "남쪽 호수", type: "lake" }, { id: 11, name: "남동 산악", type: "mountain" },
+      { id: 12, name: "남서 절벽", type: "mountain" }, { id: 13, name: "남쪽 숲", type: "forest" },
+      { id: 14, name: "남동 숲", type: "forest" }, { id: 15, name: "동남 폐허", type: "ruins" }
     ];
 
     const WEAPONS = [
-      { name: "맨손", dmg: 10 },
-      { name: "돌멩이", dmg: 15 },
-      { name: "단검", dmg: 25 },
-      { name: "장궁", dmg: 35 },
-      { name: "강철 창", dmg: 45 }
+      { name: "맨손", dmg: 10 }, { name: "돌멩이", dmg: 15 },
+      { name: "단검", dmg: 25 }, { name: "장궁", dmg: 35 }, { name: "강철 창", dmg: 45 }
     ];
 
     let players = [];
     let round = 1;
+    let autoInterval = null;
+    let isAutoRunning = false;
 
     function log(msg, type = 'event') {
       const box = document.getElementById('log-box');
@@ -214,42 +231,85 @@ html_code = """
       box.scrollTop = box.scrollHeight;
     }
 
+    function showDeathModal(text) {
+      const modal = document.getElementById('death-modal');
+      document.getElementById('death-modal-text').innerHTML = text;
+      modal.classList.add('show');
+      setTimeout(() => {
+        modal.classList.remove('show');
+      }, 2500);
+    }
+
     function initGame() {
+      stopAutoPlay();
       players = Array.from({length: TOTAL}, (_, i) => ({
         id: i + 1,
         name: NAMES[i],
         hp: 100,
         weapon: WEAPONS[0],
-        sectorId: (i % 2 === 0) ? 5 : 6, // 게임 시작 시 중앙(풍요의 뿔)에 스폰
+        team: null, // 팀 이름 혹은 번호
+        sectorId: (i % 2 === 0) ? 5 : 6,
         isAlive: true
       }));
 
       round = 1;
       document.getElementById('log-box').innerHTML = '';
-      log(`🚩 경기 시작! 모든 참가자가 <strong>풍요의 뿔 광장</strong>에 모였습니다!`, 'event');
+      log(`🚩 경기 시작! 20명의 참가자가 풍요의 뿔에 입장했습니다.`, 'event');
       updateUI();
     }
 
+    function toggleAutoPlay() {
+      if (isAutoRunning) {
+        stopAutoPlay();
+      } else {
+        startAutoPlay();
+      }
+    }
+
+    function startAutoPlay() {
+      isAutoRunning = true;
+      document.getElementById('btn-auto').innerText = "⏹️ 자동 진행 중지";
+      document.getElementById('btn-auto').style.backgroundColor = "#e11d48";
+      document.getElementById('auto-status').innerText = "10초마다 자동 진행 중...";
+      document.getElementById('auto-status').style.color = "#f59e0b";
+      document.getElementById('btn-next').disabled = true;
+
+      autoInterval = setInterval(() => {
+        const alive = players.filter(p => p.isAlive);
+        if (alive.length <= 1) {
+          stopAutoPlay();
+          return;
+        }
+        nextRound();
+      }, 10000);
+    }
+
+    function stopAutoPlay() {
+      isAutoRunning = false;
+      document.getElementById('btn-auto').innerText = "⏰ 자동 진행 시작 (10초)";
+      document.getElementById('btn-auto').style.backgroundColor = "#d97706";
+      document.getElementById('auto-status').innerText = "수동 조작 중";
+      document.getElementById('auto-status').style.color = "#4ade80";
+      const aliveCount = players.filter(p => p.isAlive).length;
+      if (aliveCount > 1) {
+        document.getElementById('btn-next').disabled = false;
+      }
+      if (autoInterval) clearInterval(autoInterval);
+    }
+
     function updateUI() {
-      // 1. 맵 UI 업데이트
       const mapGrid = document.getElementById('arena-map');
       mapGrid.innerHTML = '';
 
       SECTORS.forEach(sec => {
         const secDiv = document.createElement('div');
         secDiv.className = `sector sector-${sec.type}`;
-        
-        const inSectorPlayers = players.filter(p => p.sectorId === sec.id && p.isAlive);
-        let tokensHtml = inSectorPlayers.map(p => `<span class="token">${p.name}</span>`).join('');
-
-        secDiv.innerHTML = `
-          <div class="sector-title">${sec.name}</div>
-          <div class="player-tokens">${tokensHtml}</div>
-        `;
+        const inSec = players.filter(p => p.sectorId === sec.id && p.isAlive);
+        let tokensHtml = inSec.map(p => `<span class="token">${p.name}</span>`).join('');
+        secDiv.innerHTML = `<div class="sector-title">${sec.name}</div><div class="player-tokens">${tokensHtml}</div>`;
         mapGrid.appendChild(secDiv);
       });
 
-      // 2. 플레이어 카드 UI 업데이트
       const playerGrid = document.getElementById('player-grid');
       playerGrid.innerHTML = '';
       let aliveCnt = 0;
@@ -258,17 +318,16 @@ html_code = """
         if (p.isAlive) aliveCnt++;
         const card = document.createElement('div');
         card.className = `player-card ${p.isAlive ? '' : 'dead'}`;
-
-        const sectorName = SECTORS[p.sectorId].name;
+        const teamBadge = p.team ? `<span style="color:#60a5fa; font-size:0.65rem;">[팀: ${p.team}]</span>` : `<span style="color:#94a3b8; font-size:0.65rem;">[솔로]</span>`;
 
         card.innerHTML = `
           <strong>${p.name}</strong><br>
-          <span style="font-size:0.7rem; color:#60a5fa;">📍 ${sectorName}</span><br>
-          <span style="font-size:0.7rem;">🗡️ ${p.weapon.name}</span>
+          ${teamBadge}<br>
+          <span style="font-size:0.65rem;">🗡️ ${p.weapon.name}</span>
           <div class="hp-bar-bg">
-            <div class="hp-bar-fill" style="width: ${Math.max(0, p.hp)}%;"></div>
+            <div class="hp-bar-fill" style="width: ${Math.max(0, p.hp)}%; background: ${p.hp > 50 ? '#22c55e' : '#ef4444'};"></div>
           </div>
-          <span style="font-size:0.7rem;">HP: ${Math.max(0, p.hp)}</span>
+          <span style="font-size:0.65rem;">HP: ${Math.max(0, p.hp)}</span>
         `;
         playerGrid.appendChild(card);
       });
@@ -276,10 +335,8 @@ html_code = """
       document.getElementById('alive-count').innerText = aliveCnt;
       document.getElementById('round-count').innerText = round;
 
-      if (aliveCnt <= 1) {
-        document.getElementById('btn-next').disabled = true;
-      } else {
-        document.getElementById('btn-next').disabled = false;
+      if (aliveCnt <= 1 && isAutoRunning) {
+        stopAutoPlay();
       }
     }
 
@@ -287,49 +344,71 @@ html_code = """
       const aliveList = players.filter(p => p.isAlive);
       if (aliveList.length <= 1) return;
 
-      log(`--- 📢 라운드 ${round} 진행 ---`, 'event');
+      log(`--- 📢 라운드 ${round} 시작 ---`, 'event');
 
-      // 1. 플레이어 이동 처리
+      // 1. 이동
       aliveList.forEach(p => {
-        if (Math.random() < 0.6) { // 60% 확률로 다른 위치 이동
-          const newSector = Math.floor(Math.random() * SECTORS.length);
-          p.sectorId = newSector;
+        if (Math.random() < 0.65) {
+          p.sectorId = Math.floor(Math.random() * SECTORS.length);
         }
       });
 
-      // 2. 파밍/무기 획득 이벤트
-      const luckyPlayer = aliveList[Math.floor(Math.random() * aliveList.length)];
-      const newWep = WEAPONS[Math.floor(Math.random() * (WEAPONS.length - 1)) + 1];
-      if (newWep.dmg > luckyPlayer.weapon.dmg) {
-        luckyPlayer.weapon = newWep;
-        log(`🎒 <strong>${luckyPlayer.name}</strong>이(가) [${SECTORS[luckyPlayer.sectorId].name}]에서 [${newWep.name}]을(를) 주웠습니다!`, 'move');
+      // 2. 동맹 결성 또는 배신 이벤트
+      if (Math.random() < 0.4) {
+        const p1 = aliveList[Math.floor(Math.random() * aliveList.length)];
+        const p2 = aliveList[Math.floor(Math.random() * aliveList.length)];
+        if (p1.id !== p2.id) {
+          // 이미 같은 팀인데 배신하는 경우
+          if (p1.team && p1.team === p2.team && Math.random() < 0.3) {
+            p1.team = null;
+            log(`⚡ <strong>${p1.name}</strong>이(가) 팀원이었던 <strong>${p2.name}</strong>을(를) <strong>배신</strong>하고 동맹을 이탈했습니다!`, 'betray');
+          } else if (!p1.team && !p2.team) {
+            const teamName = `팀-${p1.name.slice(0,1)}${p2.name.slice(0,1)}`;
+            p1.team = teamName;
+            p2.team = teamName;
+            log(`🤝 <strong>${p1.name}</strong>와(과) <strong>${p2.name}</strong>이(가) 새로운 동맹 [${teamName}]을 결성했습니다!`, 'team');
+          }
+        }
       }
 
-      // 3. 같은 구역(섹터)에 있는 플레이어들끼리 전투 교전
+      // 3. 파밍
+      const lucky = aliveList[Math.floor(Math.random() * aliveList.length)];
+      const newWep = WEAPONS[Math.floor(Math.random() * (WEAPONS.length - 1)) + 1];
+      if (newWep.dmg > lucky.weapon.dmg) {
+        lucky.weapon = newWep;
+        log(`🎁 <strong>${lucky.name}</strong>이(가) [${SECTORS[lucky.sectorId].name}]에서 [${newWep.name}]을(를) 획득했습니다!`, 'event');
+      }
+
+      // 4. 전투
       SECTORS.forEach(sec => {
         const secAlive = players.filter(p => p.sectorId === sec.id && p.isAlive);
         if (secAlive.length >= 2) {
-          // 2명 선택 후 교전
           const p1 = secAlive[0];
-          const p2 = secAlive[1];
+          // 같은 팀이 아닌 상대 우선 선택
+          const enemies = secAlive.filter(p => p.id !== p1.id && (!p1.team || p1.team !== p.team));
+          const targetPool = enemies.length > 0 ? enemies : secAlive.filter(p => p.id !== p1.id);
+          
+          if (targetPool.length > 0) {
+            const p2 = targetPool[Math.floor(Math.random() * targetPool.length)];
+            const dmg = p1.weapon.dmg + Math.floor(Math.random() * 12);
+            p2.hp -= dmg;
 
-          const damage = p1.weapon.dmg + Math.floor(Math.random() * 10);
-          p2.hp -= damage;
+            log(`⚔️ [${sec.name}] <strong>${p1.name}</strong>의 공격! <strong>${p2.name}</strong>에게 ${dmg} 피해 (${p2.hp <= 0 ? '치명상!' : '생존'})`, 'battle');
 
-          log(`⚔️ [${sec.name}] <strong>${p1.name}</strong>이(가) ${p1.weapon.name}(으)로 <strong>${p2.name}</strong>을(를) 공격해 ${damage} 피해!`, 'battle');
-
-          if (p2.hp <= 0) {
-            p2.isAlive = false;
-            p2.hp = 0;
-            log(`💀 <strong>${p2.name}</strong>이(가) [${sec.name}]에서 사망하였습니다!`, 'battle');
+            if (p2.hp <= 0 && p2.isAlive) {
+              p2.isAlive = false;
+              p2.hp = 0;
+              showDeathModal(`<strong>${p2.name}</strong>님이 사망했습니다!`);
+              log(`💀 <strong>${p2.name}</strong>이(가) 전사했습니다!`, 'battle');
+            }
           }
         }
       });
 
-      // 승리 판정
       const currentAlive = players.filter(p => p.isAlive);
       if (currentAlive.length === 1) {
-        log(`🏆 <strong>경기 종료! ${currentAlive[0].name}이(가) 최종 최후의 1인으로 우승하였습니다!</strong>`, 'event');
+        log(`🏆 <strong>최종 우승자: ${currentAlive[0].name}!!</strong>`, 'event');
+        stopAutoPlay();
       }
 
       round++;
@@ -342,4 +421,4 @@ html_code = """
 </html>
 """
 
-components.html(html_code, height=900, scrolling=True)
+components.html(html_code, height=920, scrolling=True)

@@ -2,8 +2,8 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 st.set_page_config(
-    page_title="헝거게임 - 스폰서, 재난, 구급상자 패치",
-    page_icon="🎁",
+    page_title="헝거게임 - 맵 이벤트 시각화 패치",
+    page_icon="🗺️",
     layout="wide"
 )
 
@@ -92,7 +92,7 @@ html_code = """
       justify-content: space-between;
       position: relative;
       overflow: hidden;
-      transition: background-color 0.3s;
+      transition: all 0.3s;
     }
 
     .sector-center { background-color: #7c2d12; color: #ffedd5; }
@@ -101,13 +101,23 @@ html_code = """
     .sector-lake { background-color: #0c4a6e; color: #e0f2fe; }
     .sector-ruins { background-color: #4c1d95; color: #f3e8ff; }
 
+    /* 구역 봉쇄 / 재난 스타일 */
     .sector.sealed {
       background-color: #450a0a !important;
       border: 2px solid #ef4444 !important;
       color: #fca5a5;
     }
+    .sector.fire-event {
+      border: 2px solid #f97316 !important;
+      box-shadow: inset 0 0 10px #f97316;
+    }
+    .sector.fog-event {
+      border: 2px solid #a855f7 !important;
+      box-shadow: inset 0 0 10px #a855f7;
+    }
 
-    .sector-title { font-weight: bold; opacity: 0.8; font-size: 0.65rem; }
+    .sector-title { font-weight: bold; opacity: 0.85; font-size: 0.65rem; display: flex; justify-content: space-between; align-items: center; }
+    .event-icons { font-size: 0.75rem; }
     .player-tokens { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; }
     .token {
       font-size: 0.6rem;
@@ -166,7 +176,7 @@ html_code = """
   </div>
 
   <header>
-    <h1>🔥 헝거게임 (스폰서·재난·구급상자 패치)</h1>
+    <h1>🔥 헝거게임 (맵 이벤트 아이콘 표시 패치)</h1>
     <div style="display: flex; gap: 10px;">
       <button class="btn btn-primary" onclick="initGame()">새 경기 시작</button>
       <button class="btn btn-warning" id="btn-auto" onclick="toggleAutoPlay()">⏰ 자동 진행 시작 (10초)</button>
@@ -227,6 +237,8 @@ html_code = """
     let players = [];
     let round = 1;
     let sealedSectors = [];
+    let activeDisasters = {}; // 구역별 재난 상태 (예: { 1: "🔥", 3: "🌫️" })
+    let activeSponsors = {};  // 구역별 보급품 상태 (예: { 5: "📦" })
     let autoInterval = null;
     let isAutoRunning = false;
 
@@ -261,8 +273,8 @@ html_code = """
         id: i + 1,
         name: NAMES[i],
         hp: 100,
-        inventory: [], // 무기 및 구급상자 보관
-        medkits: 0,    // 구급상자 보유 수
+        inventory: [],
+        medkits: 0,
         kills: 0,
         team: null,
         sectorId: (i % 2 === 0) ? 5 : 6,
@@ -271,8 +283,10 @@ html_code = """
 
       round = 1;
       sealedSectors = [];
+      activeDisasters = {};
+      activeSponsors = {};
       document.getElementById('log-box').innerHTML = '';
-      log(`🚩 경기 시작! 스폰서 보급품, 재난 이벤트, 구급상자 시스템이 활성화되었습니다.`, 'event');
+      log(`🚩 경기 시작! 스폰서(📦), 산불(🔥), 독안개(🌫️)가 맵에 실시간으로 표시됩니다.`, 'event');
       updateUI();
     }
 
@@ -322,7 +336,14 @@ html_code = """
       SECTORS.forEach(sec => {
         const secDiv = document.createElement('div');
         const isSealed = sealedSectors.includes(sec.id);
-        secDiv.className = `sector sector-${sec.type} ${isSealed ? 'sealed' : ''}`;
+        const disasterIcon = activeDisasters[sec.id] || '';
+        const sponsorIcon = activeSponsors[sec.id] || '';
+
+        let extraClass = '';
+        if (disasterIcon === '🔥') extraClass = 'fire-event';
+        if (disasterIcon === '🌫️') extraClass = 'fog-event';
+
+        secDiv.className = `sector sector-${sec.type} ${isSealed ? 'sealed' : ''} ${extraClass}`;
         
         const inSec = players.filter(p => p.sectorId === sec.id && p.isAlive);
         let tokensHtml = inSec.map(p => {
@@ -330,12 +351,15 @@ html_code = """
           return `<span class="token" style="background:${style.color}; color:#0f172a;">${p.name} (${p.kills}킬)</span>`;
         }).join('');
 
-        const sealLabel = isSealed ? '<div style="color:#f87171; font-weight:bold; font-size:0.6rem;">🚫 [봉쇄됨]</div>' : '';
+        const sealLabel = isSealed ? '<span style="color:#f87171; font-weight:bold; font-size:0.6rem;">🚫 [봉쇄]</span>' : '';
+        const eventIcons = `<span class="event-icons">${disasterIcon}${sponsorIcon}</span>`;
 
         secDiv.innerHTML = `
           <div>
-            <div class="sector-title">${sec.name}</div>
-            ${sealLabel}
+            <div class="sector-title">
+              <span>${sec.name} ${sealLabel}</span>
+              ${eventIcons}
+            </div>
           </div>
           <div class="player-tokens">${tokensHtml}</div>
         `;
@@ -383,35 +407,53 @@ html_code = """
 
       log(`--- 📢 라운드 ${round} 시작 ---`, 'event');
 
-      // [시스템 2] 랜덤 환경 이벤트 (매 7턴마다 산불 또는 독안개 발생)
-      if (round > 1 && round % 7 === 0) {
-        const disasterType = Math.random() < 0.5 ? "산불" : "독안개";
-        log(`🌪️ <strong>[환경 재난 발생]</strong> 경기장에 강력한 <strong>${disasterType}</strong>이(가) 불어닥쳐 모든 생존자가 피해를 입습니다!`, 'disaster');
-        
-        aliveList.forEach(p => {
-          const disasterDmg = Math.floor(Math.random() * 15) + 10;
-          p.hp -= disasterDmg;
-          log(`⚠️ ${p.name}님이 ${disasterType} 피해로 체력 -${disasterDmg} (남은 HP: ${Math.max(0, p.hp)})`, 'disaster');
+      // 라운드 변경 시 이전 단발성 이벤트 아이콘 초기화
+      activeDisasters = {};
+      activeSponsors = {};
 
-          if (p.hp <= 0 && p.isAlive) {
-            p.isAlive = false;
-            p.hp = 0;
-            showDeathModal(`<strong>${p.name}</strong>님이 ${disasterType}을 견디지 못하고 사망했습니다!`);
-            log(`💀 <strong>${p.name}</strong>님이 ${disasterType}로 사망하셨습니다.`, 'disaster');
+      // [환경 재난 이벤트] 매 7턴마다 무작위 2~3개 구역에 산불 또는 독안개 발생
+      if (round > 1 && round % 7 === 0) {
+        const isFire = Math.random() < 0.5;
+        const disasterName = isFire ? "산불" : "독안개";
+        const disasterIcon = isFire ? "🔥" : "🌫️";
+
+        // 아직 봉쇄되지 않은 구역 중 2개 선정하여 재난 발생
+        const openSectors = SECTORS.filter(s => !sealedSectors.includes(s.id));
+        const affectedSectors = [...openSectors].sort(() => Math.random() - 0.5).slice(0, 2);
+
+        affectedSectors.forEach(sec => {
+          activeDisasters[sec.id] = disasterIcon;
+        });
+
+        log(`🌪️ <strong>[환경 재난]</strong> [${affectedSectors.map(s => s.name).join(', ')}] 구역에 <strong>${disasterName} ${disasterIcon}</strong>이(가) 불어닥칩니다!`, 'disaster');
+
+        // 해당 구역에 있던 플레이어들에게 피해
+        aliveList.forEach(p => {
+          if (affectedSectors.some(sec => sec.id === p.sectorId)) {
+            const disasterDmg = Math.floor(Math.random() * 15) + 15;
+            p.hp -= disasterDmg;
+            log(`⚠️ [${disasterName}] <strong>${p.name}</strong>님이 피해를 입어 HP -${disasterDmg} (남은 HP: ${Math.max(0, p.hp)})`, 'disaster');
+
+            if (p.hp <= 0 && p.isAlive) {
+              p.isAlive = false;
+              p.hp = 0;
+              showDeathModal(`<strong>${p.name}</strong>님이 ${disasterName}에 휩쓸려 사망했습니다!`);
+              log(`💀 <strong>${p.name}</strong>님이 ${disasterName}로 전사하셨습니다.`, 'disaster');
+            }
           }
         });
       }
 
-      // [구급상자 자가 치유 시스템] 턴 시작 시 체력이 60 미만이고 구급상자가 있으면 자동 사용
+      // [구급상자 자가 치유]
       aliveList.forEach(p => {
         if (p.isAlive && p.hp < 60 && p.medkits > 0) {
           p.medkits -= 1;
           p.hp = Math.min(100, p.hp + 40);
-          log(`🩹 <strong>${p.name}</strong>이(가) 구급상자를 사용하여 체력을 40 회복했습니다! (현재 HP: ${p.hp})`, 'sponsor');
+          log(`🩹 <strong>${p.name}</strong>이(가) 구급상자를 사용하여 체력을 회복했습니다! (현재 HP: ${p.hp})`, 'sponsor');
         }
       });
 
-      // 구역 봉쇄 규칙: 20턴 전 10턴마다, 이후 3턴마다
+      // 구역 봉쇄 체킹
       let shouldSeal = false;
       if (round < 20) {
         if (round > 1 && (round - 1) % 10 === 0) shouldSeal = true;
@@ -425,7 +467,7 @@ html_code = """
           const targetSec = availableSectors[Math.floor(Math.random() * availableSectors.length)];
           sealedSectors.push(targetSec.id);
 
-          log(`🚨 <strong>[구역 봉쇄 경보]</strong> <strong>[${targetSec.name}]</strong> 구역이 폐쇄되었습니다!`, 'seal');
+          log(`🚨 <strong>[구역 봉쇄]</strong> <strong>[${targetSec.name}]</strong> 구역이 폐쇄되었습니다!`, 'seal');
           showDeathModal(`🚨 [구역 봉쇄 발동]<br>${targetSec.name} 구역 폐쇄!`);
 
           players.forEach(p => {
@@ -449,14 +491,14 @@ html_code = """
         }
       });
 
-      // 2. 동맹 & 배신 이벤트
+      // 2. 동맹 & 배신
       if (Math.random() < 0.4) {
         const p1 = aliveList[Math.floor(Math.random() * aliveList.length)];
         const p2 = aliveList[Math.floor(Math.random() * aliveList.length)];
         if (p1.id !== p2.id) {
           if (p1.team && p1.team === p2.team && Math.random() < 0.3) {
             p1.team = null;
-            log(`⚡ <strong>${p1.name}</strong>이(가) 팀원이었던 <strong>${p2.name}</strong>을(를) <strong>배신</strong>했습니다!`, 'betray');
+            log(`⚡ <strong>${p1.name}</strong>이(가) 팀원 <strong>${p2.name}</strong>을(를) <strong>배신</strong>했습니다!`, 'betray');
           } else if (!p1.team && !p2.team) {
             const teamName = `팀-${p1.name.slice(0,1)}${p2.name.slice(0,1)}`;
             p1.team = teamName;
@@ -466,33 +508,33 @@ html_code = """
         }
       }
 
-      // [시스템 1] 스폰서 보급품 공중 투하 이벤트 (25% 확률)
-      if (Math.random() < 0.25) {
+      // [스폰서 보급품 맵 투하] 30% 확률로 맵 상의 무작위 구역에 📦 보급 아이콘 표시 및 지원
+      if (Math.random() < 0.3) {
         const luckySponsor = aliveList[Math.floor(Math.random() * aliveList.length)];
+        activeSponsors[luckySponsor.sectorId] = "📦";
+
         if (Math.random() < 0.5) {
-          // 강력한 무기 지원
           const sponsorWep = WEAPONS_POOL[Math.floor(Math.random() * WEAPONS_POOL.length)];
           luckySponsor.inventory.push(sponsorWep);
-          log(`📦 <strong>[스폰서 보급품]</strong> 하늘에서 낙하산이 내려와 <strong>${luckySponsor.name}</strong>에게 [${sponsorWep.name}]을(를) 선물했습니다!`, 'sponsor');
+          log(`📦 <strong>[스폰서 보급품]</strong> [${SECTORS[luckySponsor.sectorId].name}] 구역에 낙하산 투하! <strong>${luckySponsor.name}</strong>에게 [${sponsorWep.name}] 지급!`, 'sponsor');
         } else {
-          // 구급상자 지원
           luckySponsor.medkits += 1;
-          log(`📦 <strong>[스폰서 보급품]</strong> 관중들이 환호하며 <strong>${luckySponsor.name}</strong>에게 구급상자를 투하했습니다!`, 'sponsor');
+          log(`📦 <strong>[스폰서 보급품]</strong> [${SECTORS[luckySponsor.sectorId].name}] 구역에 구급상자 📦 투하 완료! (${luckySponsor.name} 획득)`, 'sponsor');
         }
       }
 
-      // 3. 일반 파밍 (무기 또는 구급상자 획득)
+      // 3. 일반 파밍
       const lucky = aliveList[Math.floor(Math.random() * aliveList.length)];
       if (Math.random() < 0.7) {
         const foundWeapon = WEAPONS_POOL[Math.floor(Math.random() * WEAPONS_POOL.length)];
         lucky.inventory.push(foundWeapon);
-        log(`🎁 <strong>${lucky.name}</strong>이(가) [${SECTORS[lucky.sectorId].name}]에서 일회용 무기 [${foundWeapon.name}]을(를) 주웠습니다!`, 'event');
+        log(`🎁 <strong>${lucky.name}</strong>이(가) [${SECTORS[lucky.sectorId].name}]에서 [${foundWeapon.name}]을(를) 획득했습니다.`, 'event');
       } else {
         lucky.medkits += 1;
-        log(`🎁 <strong>${lucky.name}</strong>이(가) [${SECTORS[lucky.sectorId].name}]에서 구급상자를 발견했습니다!`, 'event');
+        log(`🎁 <strong>${lucky.name}</strong>이(가) [${SECTORS[lucky.sectorId].name}]에서 구급상자를 주웠습니다.`, 'event');
       }
 
-      // 4. 전투 및 일회용 무기 소모 시스템
+      // 4. 전투
       SECTORS.forEach(sec => {
         if (sealedSectors.includes(sec.id)) return;
 
@@ -524,10 +566,10 @@ html_code = """
               p2.isAlive = false;
               p2.hp = 0;
               p1.kills += 1;
-              p1.hp = 100; // 처치 시 풀피 회복
+              p1.hp = 100;
 
               showDeathModal(`<strong>${p2.name}</strong>님이 전사했습니다!<br><span style="color:#f59e0b; font-size:1rem;">(처치자: ${p1.name} / 총 ${p1.kills}킬 / HP 풀피 회복!)</span>`);
-              log(`💀 <strong>${p2.name}</strong> 전사! <span style="color:#f59e0b;">(🔥 ${p1.name} 킬수 +1 [총 ${p1.kills}킬] & <strong>체력 완전 회복!</strong>)</span>`, 'battle');
+              log(`💀 <strong>${p2.name}</strong> 전사! <span style="color:#f59e0b;">(🔥 ${p1.name} 킬수 +1 [총 ${p1.kills}킬] & <strong>체력 완충!</strong>)</span>`, 'battle');
             }
           }
         }
